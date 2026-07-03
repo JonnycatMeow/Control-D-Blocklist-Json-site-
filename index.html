@@ -21,7 +21,7 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
-    min-height: 10vh;
+    min-height: 100vh;
     padding: 24px;
     line-height: 1.5;
     transition: background 0.4s ease;
@@ -84,8 +84,8 @@
   }
   textarea:focus { border-color: var(--accent); }
 
-  /* Character counter styles */
-  .char-counter {
+  /* Rule counter styles */
+  .rule-counter {
     font-size: 0.78rem;
     color: var(--muted);
     margin-top: 6px;
@@ -93,12 +93,12 @@
     align-items: center;
     gap: 8px;
   }
-  .char-counter b {
-    min-width: 80px;
+  .rule-counter b {
+    min-width: 100px;
     font-family: monospace;
   }
-  .char-counter.warn b { color: #ffb84d; }
-  .char-counter.err b { color: var(--red); }
+  .rule-counter.warn b { color: #ffb84d; }
+  .rule-counter.err b { color: var(--red); }
 
   .fetch-row { display: flex; gap: 8px; margin-bottom: 12px; }
   .fetch-row input {
@@ -199,7 +199,7 @@
     </label>
     <details class="css-box">
       <summary>Custom CSS background</summary>
-      <textarea id="customCss" placeholder="e.g.  url('https://example.com/bg.jpg') center/cover no-repeat  OR  linear-gradient(45deg,#000,#333)"></textarea>
+      <textarea id="customCss" placeholder="e.g. url('https://example.com/bg.jpg') center/cover no-repeat OR linear-gradient(45deg,#000,#333)"></textarea>
       <button class="secondary" onclick="applyCustomCss()" style="margin-top:6px;">Apply CSS</button>
     </details>
   </div>
@@ -221,13 +221,13 @@ example.com
 0.0.0.0 malware.example
 # comments & blanks ignored"></textarea>
       
-      <!-- CHARACTER COUNTER -->
-      <div class="char-counter" id="charCounter">
-        <b>0/10,000</b> chars (0%)
+      <!-- RULE COUNTER (changed from character counter) -->
+      <div class="rule-counter" id="ruleCounter">
+        <b>0/10,000</b> Rules (0% of max)
       </div>
       
       <div class="status" id="fetchStatus"></div>
-      <p class="hint">Supports:<br>• GitHub (<code>github.com/user/repo/blob/...</code>)<br>• jsDelivr (<code>cdn.jsdelivr.net/gh/...</code>)<br>• Wildcards <code>*.domain.com</code>, adblock <code>||domain^</code>, hosts-file formats</p>
+      <p class="hint">Supports:<br>• GitHub (<code>github.com/user/repo/blob/...</code>)<br>• jsDelivr (<code>cdn.jsdelivr.net/gh/...</code>)<br>• Wildcards <code>*.domain.com</code>, adblock <code>||domain^</code>, hosts-file formats<br>⚠️ Output limited to 10,000 RULES (not characters)</p>
     </div>
 
     <!-- OUTPUT -->
@@ -278,7 +278,7 @@ example.com
 
   <footer>
     100% client-side — nothing is stored. Your theme choices are saved locally. Import the JSON in your Control D dashboard.<br>
-    <small>⚠️ Input limited to 10,000 characters for reliability | Supports GitHub & jsDelivr URLs</small>
+    <small>⚠️ Output limited to 10,000 rules maximum for compatibility | Supports GitHub & jsDelivr URLs</small>
   </footer>
 </div>
 
@@ -286,25 +286,26 @@ example.com
 
 <script>
 const $ = id => document.getElementById(id);
-const MAX_CHARS = 10000;
+const MAX_RULES = 10000;
 
-/* ---------- CHARACTER COUNTER ---------- */
-function updateCharCounter() {
-  const val = $('input').value;
-  const counterEl = $('charCounter');
+/* ---------- RULE COUNTER ---------- */
+function updateRuleCounter() {
+  const { domains, skipped, wildcards } = parseInput();
+  const ruleCount = domains.length;
+  const counterEl = $('ruleCounter');
   
   // Update counter display
-  const pct = Math.min(100, Math.round(val.length / MAX_CHARS * 100));
+  const pct = Math.min(100, Math.round(ruleCount / MAX_RULES * 100));
   counterEl.classList.remove('warn', 'err');
   
-  if (val.length > MAX_CHARS) {
+  if (ruleCount > MAX_RULES) {
     counterEl.classList.add('err');
-    counterEl.innerHTML = `<b>${val.length.toLocaleString()}/${MAX_CHARS.toLocaleString()}</b> chars (${pct}%) ⚠️ OVER LIMIT`;
-  } else if (val.length > MAX_CHARS * 0.9) {
+    counterEl.innerHTML = `<b>${ruleCount.toLocaleString()}/${MAX_RULES.toLocaleString()}</b> Rules (${pct}%) ⚠️ OVER LIMIT`;
+  } else if (ruleCount > MAX_RULES * 0.9) {
     counterEl.classList.add('warn');
-    counterEl.innerHTML = `<b>${val.length.toLocaleString()}/${MAX_CHARS.toLocaleString()}</b> chars (${pct}%) ⚠️ Near Limit`;
+    counterEl.innerHTML = `<b>${ruleCount.toLocaleString()}/${MAX_RULES.toLocaleString()}</b> Rules (${pct}%) ⚠️ Near Limit`;
   } else {
-    counterEl.innerHTML = `<b>${val.length.toLocaleString()}/${MAX_CHARS.toLocaleString()}</b> chars (${pct}%)`;
+    counterEl.innerHTML = `<b>${ruleCount.toLocaleString()}/${MAX_RULES.toLocaleString()}</b> Rules (${pct}%)`;
   }
 }
 
@@ -364,7 +365,7 @@ function convertToRawUrl(url) {
     'https://raw.githubusercontent.com/$1/$2/$3'
   );
   
-  // Auto-convert jsdelivr gh links to proper format
+  // Normalize jsdelivr cdn links
   converted = converted.replace(
     /^https?:\/\/cdn\.jsdelivr\.net\/gh\/([^/]+)\/([^/]+)@?(.+)?$/,
     'https://cdn.jsdelivr.net/gh/$1/$2@$3'
@@ -407,30 +408,37 @@ async function fetchList() {
       text = await r2.text();
     }
     
-    // Check combined length BEFORE appending
-    const existing = $('input').value.trim();
-    const combinedLen = existing ? existing.length + text.length : text.length;
+    // Check estimated rule count BEFORE appending
+    const existingDomains = parseInput().domains.length;
+    const fetchedLines = text.split(/\r?\n/).filter(l => l.trim());
+    const estimatedNewRules = fetchedLines.filter(line => {
+      const d = normalizeDomain(line);
+      return d !== null && !line.startsWith('#') && !line.startsWith('!');
+    }).length;
     
-    if (combinedLen > MAX_CHARS) {
-      const remaining = Math.max(0, MAX_CHARS - existing.length);
+    const totalEstimate = existingDomains + estimatedNewRules;
+    
+    if (totalEstimate > MAX_RULES) {
+      const remaining = Math.max(0, MAX_RULES - existingDomains);
       if (remaining === 0) {
         status.className = 'status error';
-        status.textContent = `❌ Current input already at ${MAX_CHARS.toLocaleString()} char limit`;
+        status.textContent = `❌ Current rules already at ${MAX_RULES.toLocaleString()} limit`;
         btn.disabled = false;
         return;
       }
       
       // Truncate fetched content to fit remaining space
-      text = text.substring(0, remaining);
-      const addedLines = text.split(/\r?\n/).filter(l => l.trim()).length;
+      const linesToAdd = text.split(/\r?\n/).slice(0, remaining * 2); // Rough estimate (some lines may be invalid/comments)
+      text = linesToAdd.join('\n');
       status.className = 'status loading';
-      status.innerHTML = `⚠️ Trimmed to fit limit<br><small>Added ${addedLines} lines (${MAX_CHARS.toLocaleString()} chars max)</small>`;
+      status.innerHTML = `⚠️ Trimmed to fit rule limit<br><small>Fetched list would exceed 10K rules, truncated to fill remaining space (${remaining} slots available)</small>`;
     }
     
     // Append or replace
+    const existing = $('input').value.trim();
     const finalText = existing ? existing + '\n' + text : text;
     $('input').value = finalText;
-    updateCharCounter();
+    updateRuleCounter();
     convert();
   } catch (err) {
     status.className = 'status error';
@@ -498,33 +506,34 @@ function buildOutput() {
 }
 
 function convert(download = false) {
-  const inputLen = $('input').value.length;
+  const { domains, skipped, wildcards } = parseInput();
+  const ruleCount = domains.length;
   const status = $('fetchStatus');
   
-  // Validation check
-  if (inputLen > MAX_CHARS) {
+  // Validation check - enforce 10K rule limit
+  if (ruleCount > MAX_RULES) {
     status.className = 'status error';
-    status.textContent = `❌ Input exceeds ${MAX_CHARS.toLocaleString()} character limit (${inputLen.toLocaleString()} chars)`;
+    status.textContent = `❌ Output exceeds ${MAX_RULES.toLocaleString()} rule limit (${ruleCount.toLocaleString()} rules)`;
     return;
   }
   
   // Continue with normal conversion
-  const { out, domains, skipped, wildcards } = buildOutput();
+  const { out } = buildOutput();
   $('output').value = out;
-  $('count').textContent = domains.length.toLocaleString();
+  $('count').textContent = ruleCount.toLocaleString();
   $('wcount').textContent = wildcards.toLocaleString();
   $('skipped').textContent = skipped.toLocaleString();
   
-  // Update status message
-  if (inputLen >= MAX_CHARS * 0.9) {
+  // Update status message based on rule count
+  if (ruleCount >= MAX_RULES * 0.9) {
     status.className = 'status loading warn';
-    status.textContent = `⚠️ Near ${MAX_CHARS.toLocaleString()} char limit (${Math.round(inputLen/MAX_CHARS*100)}% used)`;
+    status.textContent = `⚠️ Near ${MAX_RULES.toLocaleString()} rule limit (${Math.round(ruleCount/MAX_RULES*100)}% used)`;
   } else {
     status.className = 'status ok';
     status.textContent = '';
   }
   
-  if (download && $('autoDownload').checked && domains.length) downloadJSON();
+  if (download && $('autoDownload').checked && ruleCount) downloadJSON();
 }
 
 /* ---------- DOWNLOAD ---------- */
@@ -559,7 +568,7 @@ function clearAll() {
   $('input').value = ''; $('output').value = ''; $('ghUrl').value = '';
   $('fetchStatus').textContent = '';
   ['count','wcount','skipped'].forEach(id => $(id).textContent = '0');
-  updateCharCounter();
+  updateRuleCounter();
 }
 function loadSample() {
   $('input').value = `# Sample blocklist with wildcards
@@ -571,7 +580,7 @@ https://spyware.example.org/path
 *.ads.google.com
 googleadservices.com
 ads.example.com`;
-  updateCharCounter();
+  updateRuleCounter();
   convert();
 }
 function showToast(msg) {
@@ -583,21 +592,14 @@ function showToast(msg) {
 
 // Event listeners
 $('input').addEventListener('input', (e) => {
-  updateCharCounter();
-  
-  // Enforce hard limit - prevent exceeding MAX_CHARS
-  if (e.target.value.length > MAX_CHARS) {
-    e.target.value = e.target.value.substring(0, MAX_CHARS);
-    updateCharCounter();
-  }
-  
+  updateRuleCounter();
   convert(false);
 });
 $('ghUrl').addEventListener('keydown', e => { if (e.key === 'Enter') fetchList(); });
 
 buildPresets();
 loadSavedBg();
-updateCharCounter();
+updateRuleCounter();
 </script>
 </body>
 </html>
