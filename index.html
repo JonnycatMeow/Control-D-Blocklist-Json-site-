@@ -21,7 +21,7 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
-    min-height: 100vh;
+    min-height: 10vh;
     padding: 24px;
     line-height: 1.5;
     transition: background 0.4s ease;
@@ -182,7 +182,7 @@
 <div class="container">
   <header>
     <h1>🛡️ Control D Blocklist JSON Maker</h1>
-    <p>Convert domain lists (wildcard supported) into Control D JSON. Fetch from GitHub, customize, auto-download.</p>
+    <p>Convert domain lists (wildcard supported) into Control D JSON. Fetch from GitHub, jsDelivr, customize, auto-download.</p>
   </header>
 
   <!-- THEME / BACKGROUND CUSTOMIZER -->
@@ -211,7 +211,7 @@
         <button class="secondary" onclick="loadSample()">Sample</button>
       </h2>
       <div class="fetch-row">
-        <input type="url" id="ghUrl" placeholder="Paste GitHub raw link or any blocklist URL...">
+        <input type="url" id="ghUrl" placeholder="GitHub raw, jsDelivr CDN, or any blocklist URL...">
         <button onclick="fetchList()" id="fetchBtn">Fetch</button>
       </div>
       <textarea id="input" placeholder="One domain per line:
@@ -227,7 +227,7 @@ example.com
       </div>
       
       <div class="status" id="fetchStatus"></div>
-      <p class="hint">Wildcards <code>*.domain.com</code>, adblock <code>||domain^</code>, hosts-file, and full URLs supported.</p>
+      <p class="hint">Supports:<br>• GitHub (<code>github.com/user/repo/blob/...</code>)<br>• jsDelivr (<code>cdn.jsdelivr.net/gh/...</code>)<br>• Wildcards <code>*.domain.com</code>, adblock <code>||domain^</code>, hosts-file formats</p>
     </div>
 
     <!-- OUTPUT -->
@@ -278,7 +278,7 @@ example.com
 
   <footer>
     100% client-side — nothing is stored. Your theme choices are saved locally. Import the JSON in your Control D dashboard.<br>
-    <small>⚠️ Input limited to 10,000 characters for reliability</small>
+    <small>⚠️ Input limited to 10,000 characters for reliability | Supports GitHub & jsDelivr URLs</small>
   </footer>
 </div>
 
@@ -356,6 +356,29 @@ function loadSavedBg() {
   } catch(e){}
 }
 
+/* ---------- URL CONVERSION (GitHub & jsDelivr) ---------- */
+function convertToRawUrl(url) {
+  // Auto-convert github.com blob links to raw
+  let converted = url.replace(
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/,
+    'https://raw.githubusercontent.com/$1/$2/$3'
+  );
+  
+  // Auto-convert jsdelivr gh links to proper format
+  converted = converted.replace(
+    /^https?:\/\/cdn\.jsdelivr\.net\/gh\/([^/]+)\/([^/]+)@?(.+)?$/,
+    'https://cdn.jsdelivr.net/gh/$1/$2@$3'
+  );
+  
+  // Also accept raw.githubusercontent style but through jsDelivr
+  converted = converted.replace(
+    /^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/(.+)$/,
+    'https://cdn.jsdelivr.net/gh/$1/$2@$3'
+  );
+  
+  return converted !== url ? converted : url;
+}
+
 /* ---------- GITHUB / URL FETCH ---------- */
 async function fetchList() {
   let url = $('ghUrl').value.trim();
@@ -363,11 +386,8 @@ async function fetchList() {
   const status = $('fetchStatus');
   const btn = $('fetchBtn');
 
-  // Auto-convert github.com blob links to raw
-  url = url.replace(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/,
-    'https://raw.githubusercontent.com/$1/$2/$3'
-  );
+  // Normalize URL for GitHub and jsDelivr
+  url = convertToRawUrl(url);
 
   status.className = 'status loading';
   status.textContent = '⏳ Fetching list...';
@@ -382,7 +402,7 @@ async function fetchList() {
     } catch (e) {
       // Fallback CORS proxy for blocked hosts
       status.textContent = '⏳ Retrying via proxy...';
-      const r2 = await fetch('https://corsproxy.io/??url=' + encodeURIComponent(url));
+      const r2 = await fetch('https://corsproxy.io/?' + encodeURIComponent(url));
       if (!r2.ok) throw new Error('HTTP ' + r2.status);
       text = await r2.text();
     }
