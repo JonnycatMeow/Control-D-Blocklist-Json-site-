@@ -84,7 +84,7 @@
   }
   textarea:focus { border-color: var(--accent); }
 
-  /* Rule counter styles */
+  /* Rule counter styles for OUTPUT */
   .rule-counter {
     font-size: 0.78rem;
     color: var(--muted);
@@ -221,13 +221,8 @@ example.com
 0.0.0.0 malware.example
 # comments & blanks ignored"></textarea>
       
-      <!-- RULE COUNTER (changed from character counter) -->
-      <div class="rule-counter" id="ruleCounter">
-        <b>0/10,000</b> Rules (0% of max)
-      </div>
-      
       <div class="status" id="fetchStatus"></div>
-      <p class="hint">Supports:<br>• GitHub (<code>github.com/user/repo/blob/...</code>)<br>• jsDelivr (<code>cdn.jsdelivr.net/gh/...</code>)<br>• Wildcards <code>*.domain.com</code>, adblock <code>||domain^</code>, hosts-file formats<br>⚠️ Output limited to 10,000 RULES (not characters)</p>
+      <p class="hint">Supports:<br>• GitHub (<code>github.com/user/repo/blob/...</code>)<br>• jsDelivr (<code>cdn.jsdelivr.net/gh/...</code>)<br>• Wildcards <code>*.domain.com</code>, adblock <code>||domain^</code>, hosts-file formats<br><small>Notes: Comments (#), blank lines, and invalid entries are skipped during parsing</small></p>
     </div>
 
     <!-- OUTPUT -->
@@ -236,11 +231,18 @@ example.com
         <button class="secondary" onclick="copyOutput()">Copy</button>
       </h2>
       <textarea id="output" readonly placeholder="Generated JSON appears here..."></textarea>
+      
+      <!-- RULE COUNTER FOR OUTPUT PANEL -->
+      <div class="rule-counter" id="ruleCounter">
+        <b>0/10,000</b> Rules in JSON (0% of max)
+      </div>
+      
       <div class="stats">
         <span>Rules: <b id="count">0</b></span>
         <span>Wildcards: <b id="wcount">0</b></span>
         <span>Skipped: <span class="err" id="skipped">0</span></span>
       </div>
+      <div class="status" id="outputStatus" style="margin-top:8px;"></div>
     </div>
   </div>
 
@@ -277,329 +279,4 @@ example.com
   </div>
 
   <footer>
-    100% client-side — nothing is stored. Your theme choices are saved locally. Import the JSON in your Control D dashboard.<br>
-    <small>⚠️ Output limited to 10,000 rules maximum for compatibility | Supports GitHub & jsDelivr URLs</small>
-  </footer>
-</div>
-
-<div class="toast" id="toast">Done!</div>
-
-<script>
-const $ = id => document.getElementById(id);
-const MAX_RULES = 10000;
-
-/* ---------- RULE COUNTER ---------- */
-function updateRuleCounter() {
-  const { domains, skipped, wildcards } = parseInput();
-  const ruleCount = domains.length;
-  const counterEl = $('ruleCounter');
-  
-  // Update counter display
-  const pct = Math.min(100, Math.round(ruleCount / MAX_RULES * 100));
-  counterEl.classList.remove('warn', 'err');
-  
-  if (ruleCount > MAX_RULES) {
-    counterEl.classList.add('err');
-    counterEl.innerHTML = `<b>${ruleCount.toLocaleString()}/${MAX_RULES.toLocaleString()}</b> Rules (${pct}%) ⚠️ OVER LIMIT`;
-  } else if (ruleCount > MAX_RULES * 0.9) {
-    counterEl.classList.add('warn');
-    counterEl.innerHTML = `<b>${ruleCount.toLocaleString()}/${MAX_RULES.toLocaleString()}</b> Rules (${pct}%) ⚠️ Near Limit`;
-  } else {
-    counterEl.innerHTML = `<b>${ruleCount.toLocaleString()}/${MAX_RULES.toLocaleString()}</b> Rules (${pct}%)`;
-  }
-}
-
-/* ---------- BACKGROUND CUSTOMIZER ---------- */
-const PRESETS = [
-  { name: 'Dark',   css: '#0f1117' },
-  { name: 'Midnight', css: 'linear-gradient(135deg,#0f2027,#203a43,#2c5364)' },
-  { name: 'Sunset', css: 'linear-gradient(135deg,#1a2a6c,#b21f1f,#fdbb2d)' },
-  { name: 'Ocean',  css: 'linear-gradient(135deg,#2b5876,#4e4376)' },
-  { name: 'Forest', css: 'linear-gradient(135deg,#134e5e,#71b280)' },
-  { name: 'Purple', css: 'linear-gradient(135deg,#41295a,#2F0743)' },
-  { name: 'Slate',  css: '#1e2430' },
-];
-
-function buildPresets() {
-  const wrap = $('presets');
-  PRESETS.forEach((p, i) => {
-    const s = document.createElement('div');
-    s.className = 'swatch';
-    s.style.background = p.css;
-    s.title = p.name;
-    s.onclick = () => { setBackground(p.css); markActive(i); };
-    wrap.appendChild(s);
-  });
-}
-function markActive(i) {
-  document.querySelectorAll('.swatch').forEach((el, idx) =>
-    el.classList.toggle('active', idx === i));
-}
-function setBackground(css) {
-  document.body.style.background = css;
-  document.body.style.backgroundAttachment = 'fixed';
-  try { localStorage.setItem('cd_bg', css); } catch(e){}
-}
-function applySolid() { setBackground($('bgColor').value); markActive(-1); }
-function applyGradient() {
-  setBackground(`linear-gradient(135deg, ${$('grad1').value}, ${$('grad2').value})`);
-  markActive(-1);
-}
-function applyCustomCss() {
-  const v = $('customCss').value.trim();
-  if (v) { setBackground(v); markActive(-1); }
-}
-function loadSavedBg() {
-  try {
-    const saved = localStorage.getItem('cd_bg');
-    if (saved) document.body.style.background = saved,
-               document.body.style.backgroundAttachment = 'fixed';
-  } catch(e){}
-}
-
-/* ---------- URL CONVERSION (GitHub & jsDelivr) ---------- */
-function convertToRawUrl(url) {
-  // Auto-convert github.com blob links to raw
-  let converted = url.replace(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/,
-    'https://raw.githubusercontent.com/$1/$2/$3'
-  );
-  
-  // Normalize jsdelivr cdn links
-  converted = converted.replace(
-    /^https?:\/\/cdn\.jsdelivr\.net\/gh\/([^/]+)\/([^/]+)@?(.+)?$/,
-    'https://cdn.jsdelivr.net/gh/$1/$2@$3'
-  );
-  
-  // Also accept raw.githubusercontent style but through jsDelivr
-  converted = converted.replace(
-    /^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/(.+)$/,
-    'https://cdn.jsdelivr.net/gh/$1/$2@$3'
-  );
-  
-  return converted !== url ? converted : url;
-}
-
-/* ---------- GITHUB / URL FETCH ---------- */
-async function fetchList() {
-  let url = $('ghUrl').value.trim();
-  if (!url) return;
-  const status = $('fetchStatus');
-  const btn = $('fetchBtn');
-
-  // Normalize URL for GitHub and jsDelivr
-  url = convertToRawUrl(url);
-
-  status.className = 'status loading';
-  status.textContent = '⏳ Fetching list...';
-  btn.disabled = true;
-
-  try {
-    let text;
-    try {
-      const r = await fetch(url);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      text = await r.text();
-    } catch (e) {
-      // Fallback CORS proxy for blocked hosts
-      status.textContent = '⏳ Retrying via proxy...';
-      const r2 = await fetch('https://corsproxy.io/?' + encodeURIComponent(url));
-      if (!r2.ok) throw new Error('HTTP ' + r2.status);
-      text = await r2.text();
-    }
-    
-    // Check estimated rule count BEFORE appending
-    const existingDomains = parseInput().domains.length;
-    const fetchedLines = text.split(/\r?\n/).filter(l => l.trim());
-    const estimatedNewRules = fetchedLines.filter(line => {
-      const d = normalizeDomain(line);
-      return d !== null && !line.startsWith('#') && !line.startsWith('!');
-    }).length;
-    
-    const totalEstimate = existingDomains + estimatedNewRules;
-    
-    if (totalEstimate > MAX_RULES) {
-      const remaining = Math.max(0, MAX_RULES - existingDomains);
-      if (remaining === 0) {
-        status.className = 'status error';
-        status.textContent = `❌ Current rules already at ${MAX_RULES.toLocaleString()} limit`;
-        btn.disabled = false;
-        return;
-      }
-      
-      // Truncate fetched content to fit remaining space
-      const linesToAdd = text.split(/\r?\n/).slice(0, remaining * 2); // Rough estimate (some lines may be invalid/comments)
-      text = linesToAdd.join('\n');
-      status.className = 'status loading';
-      status.innerHTML = `⚠️ Trimmed to fit rule limit<br><small>Fetched list would exceed 10K rules, truncated to fill remaining space (${remaining} slots available)</small>`;
-    }
-    
-    // Append or replace
-    const existing = $('input').value.trim();
-    const finalText = existing ? existing + '\n' + text : text;
-    $('input').value = finalText;
-    updateRuleCounter();
-    convert();
-  } catch (err) {
-    status.className = 'status error';
-    status.textContent = '❌ Failed to fetch. Check the URL / CORS. Try the raw link directly.';
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-/* ---------- PARSING / NORMALIZING ---------- */
-function normalizeDomain(raw) {
-  let d = raw.trim();
-  if (!d || d.startsWith('#') || d.startsWith('!')) return null;
-  d = d.replace(/^@@/, '').replace(/^\|\|/, '').replace(/\^.*$/, '');
-  d = d.replace(/^https?:\/\//i, '');
-  d = d.replace(/^(0\.0\.0\.0|127\.0\.0\.1|::1?|::)\s+/, '');
-  d = d.split('/')[0].split(':')[0].replace(/^\.+/, '');
-  if ($('lowercase').checked) d = d.toLowerCase();
-  if (!/^[*a-z0-9.-]+$/i.test(d)) return null;
-  if (!d.includes('.')) return null;
-  return d;
-}
-
-function parseInput() {
-  const lines = $('input').value.split(/\r?\n/);
-  const domains = [];
-  const seen = new Set();
-  let skipped = 0, wildcards = 0;
-  const dedupe = $('dedupe').checked;
-  for (const line of lines) {
-    const raw = line.trim();
-    if (!raw) continue;
-    const d = normalizeDomain(raw);
-    if (!d) { if (!raw.startsWith('#') && !raw.startsWith('!')) skipped++; continue; }
-    if (dedupe) { if (seen.has(d)) continue; seen.add(d); }
-    if (d.includes('*')) wildcards++;
-    domains.push(d);
-  }
-  return { domains, skipped, wildcards };
-}
-
-/* ---------- CONVERT ---------- */
-function buildOutput() {
-  const { domains, skipped, wildcards } = parseInput();
-  const action = $('action').value;
-  const format = $('format').value;
-  const group = ($('groupName').value || 'My Blocklist').trim();
-  let out;
-
-  if (format === 'plain') {
-    out = domains.join('\n');
-  } else if (format === 'hostnames') {
-    out = JSON.stringify({ group, action, hostnames: domains }, null, 2);
-  } else {
-    const rules = domains.map(h => ({
-      PK: h,
-      action: { do: action === 'block' ? 0 : 1, status: 1 }
-    }));
-    out = JSON.stringify({
-      group: { group, action: { do: action === 'block' ? 0 : 1, status: 1 } },
-      rules
-    }, null, 2);
-  }
-  return { out, domains, skipped, wildcards };
-}
-
-function convert(download = false) {
-  const { domains, skipped, wildcards } = parseInput();
-  const ruleCount = domains.length;
-  const status = $('fetchStatus');
-  
-  // Validation check - enforce 10K rule limit
-  if (ruleCount > MAX_RULES) {
-    status.className = 'status error';
-    status.textContent = `❌ Output exceeds ${MAX_RULES.toLocaleString()} rule limit (${ruleCount.toLocaleString()} rules)`;
-    return;
-  }
-  
-  // Continue with normal conversion
-  const { out } = buildOutput();
-  $('output').value = out;
-  $('count').textContent = ruleCount.toLocaleString();
-  $('wcount').textContent = wildcards.toLocaleString();
-  $('skipped').textContent = skipped.toLocaleString();
-  
-  // Update status message based on rule count
-  if (ruleCount >= MAX_RULES * 0.9) {
-    status.className = 'status loading warn';
-    status.textContent = `⚠️ Near ${MAX_RULES.toLocaleString()} rule limit (${Math.round(ruleCount/MAX_RULES*100)}% used)`;
-  } else {
-    status.className = 'status ok';
-    status.textContent = '';
-  }
-  
-  if (download && $('autoDownload').checked && ruleCount) downloadJSON();
-}
-
-/* ---------- DOWNLOAD ---------- */
-function safeName() {
-  return (($('groupName').value || 'controld-blocklist').trim()
-    .replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '') || 'controld-blocklist');
-}
-function downloadJSON() {
-  if (!$('output').value) convert();
-  if (!$('output').value) return;
-  const isPlain = $('format').value === 'plain';
-  const blob = new Blob([$('output').value],
-    { type: isPlain ? 'text/plain' : 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = safeName() + (isPlain ? '.txt' : '.json');
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(a.href);
-  showToast('Downloaded ' + a.download);
-}
-
-/* ---------- MISC ---------- */
-function copyOutput() {
-  const o = $('output');
-  if (!o.value) convert();
-  o.select();
-  navigator.clipboard.writeText(o.value).then(() => showToast('Copied!'));
-}
-function clearAll() {
-  $('input').value = ''; $('output').value = ''; $('ghUrl').value = '';
-  $('fetchStatus').textContent = '';
-  ['count','wcount','skipped'].forEach(id => $(id).textContent = '0');
-  updateRuleCounter();
-}
-function loadSample() {
-  $('input').value = `# Sample blocklist with wildcards
-*.doubleclick.net
-ads.example.com
-||tracker.io^
-0.0.0.0 malware-site.net
-https://spyware.example.org/path
-*.ads.google.com
-googleadservices.com
-ads.example.com`;
-  updateRuleCounter();
-  convert();
-}
-function showToast(msg) {
-  const t = $('toast');
-  t.textContent = msg || 'Done!';
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 1600);
-}
-
-// Event listeners
-$('input').addEventListener('input', (e) => {
-  updateRuleCounter();
-  convert(false);
-});
-$('ghUrl').addEventListener('keydown', e => { if (e.key === 'Enter') fetchList(); });
-
-buildPresets();
-loadSavedBg();
-updateRuleCounter();
-</script>
-</body>
-</html>
+    100% client-side — nothing is stored. Your theme choices are saved locally. Import the JSON in your Control D
